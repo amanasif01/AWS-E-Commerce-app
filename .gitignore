@@ -1,0 +1,46 @@
+# Terraform files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+external-dns.yaml
+terraform/
+
+# Local configurations
+.env
+.env.local
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependency directories
+node_modules/
+vendor/
+.npm/
+
+# Log files
+*.log
+logs/
+npm-debug.log*
+
+# Build outputs
+dist/
+build/
+out/
+
+# Temporary files
+cleanup-commands.txt
+*-patch.yaml
+
+# Miscellaneous
+.DS_Store
+.Trashes
+Thumbs.db
+my-project-key.pem
+my-devops-user_accessKeys.csv
+terraform-aws/.terraform
+terraform-aws/terraform.tfstate
+terraform-aws/terraform.tfstate.backup

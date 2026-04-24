@@ -1,0 +1,184 @@
+name: Microservices CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '**.md'
+      - 'terraform/**'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  DOCKER_HUB_USERNAME: amanasif3349
+
+permissions: write-all
+
+jobs:
+  validate:
+    name: Validate Kubernetes Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Install kubeval
+        run: |
+          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          chmod +x kubeval
+          sudo mv kubeval /usr/local/bin
+      
+      - name: Validate Kubernetes manifests
+        run: |
+          kubeval --ignore-missing-schemas k8s/*.yaml
+
+  build:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        include:
+          - service: adservice
+            dockerfile_path: ./src/adservice
+          - service: cartservice
+            dockerfile_path: ./src/cartservice/src
+          - service: checkoutservice
+            dockerfile_path: ./src/checkoutservice
+          - service: currencyservice
+            dockerfile_path: ./src/currencyservice
+          - service: emailservice
+            dockerfile_path: ./src/emailservice
+          - service: frontend
+            dockerfile_path: ./src/frontend
+          - service: paymentservice
+            dockerfile_path: ./src/paymentservice
+          - service: productcatalogservice
+            dockerfile_path: ./src/productcatalogservice
+          - service: recommendationservice
+            dockerfile_path: ./src/recommendationservice
+          - service: shippingservice
+            dockerfile_path: ./src/shippingservice
+   
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+      
+      - name: Verify Dockerfile exists
+        run: |
+          if [ ! -f "${{ matrix.dockerfile_path }}/Dockerfile" ]; then
+            echo "Dockerfile not found at ${{ matrix.dockerfile_path }}/Dockerfile"
+            ls -la ${{ matrix.dockerfile_path }}
+            exit 1
+          else
+            echo "Found Dockerfile at ${{ matrix.dockerfile_path }}/Dockerfile"
+          fi
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.DOCKER_HUB_USERNAME }}/online-boutique-${{ matrix.service }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            latest
+      
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v4
+        with:
+          context: ${{ matrix.dockerfile_path }}
+          file: ${{ matrix.dockerfile_path }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  test-deployment:
+    name: Test Kubernetes Configuration
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up kind
+        uses: helm/kind-action@v1.9.0  # Use the latest version to avoid previous issues
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+      
+      - name: Validate Kubernetes manifests with kubectl
+        run: |
+          for file in k8s/*.yaml; do
+            if [ -f "$file" ]; then
+              echo "Validating $file with kubectl..."
+              kubectl apply --dry-run=client -f "$file"
+              if [ $? -eq 0 ]; then
+                echo "✅ $file is valid"
+              else
+                echo "❌ $file has validation errors"
+                exit 1
+              fi
+            fi
+          done
+      
+      - name: Check for common Kubernetes configuration issues
+        run: |
+          echo "Checking service dependencies in Kubernetes manifests..."
+          
+          declare -a EXPECTED_SERVICES=("frontend" "cartservice" "productcatalogservice" "currencyservice" 
+                                       "paymentservice" "shippingservice" "emailservice" "checkoutservice"
+                                       "recommendationservice" "adservice" "redis-cart")
+          
+          for service in "${EXPECTED_SERVICES[@]}"; do
+            if grep -q "name: $service" k8s/*.yaml; then
+              echo "✅ Found configuration for $service"
+            else
+              echo "⚠️ Warning: Could not find configuration for $service"
+            fi
+          done
+          
+          echo "Dependencies check completed"
+        
+      - name: Check environment variables
+        run: |
+          echo "Checking environment variables in Kubernetes manifests..."
+          
+          if ! grep -q "REDIS_ADDR" k8s/cartservice.yaml; then
+            echo "⚠️ Warning: cartservice might be missing REDIS_ADDR environment variable"
+          else
+            echo "✅ cartservice has REDIS_ADDR environment variable"
+          fi
+          
+          if grep -q "PRODUCT_CATALOG_SERVICE_ADDR" k8s/frontend.yaml; then
+            echo "✅ frontend has PRODUCT_CATALOG_SERVICE_ADDR environment variable"
+          else
+            echo "⚠️ Warning: frontend might be missing PRODUCT_CATALOG_SERVICE_ADDR environment variable"
+          fi
+          
+          echo "Environment variables check completed"
+      
+      - name: Verify deployment configuration
+        run: |
+          echo "✅ All validation checks passed successfully"
+          echo "The microservices application is ready to be deployed to Kubernetes"
+          echo "Docker images would be deployed from: ${{ env.DOCKER_HUB_USERNAME }}/online-boutique-*"
+
+
+          
