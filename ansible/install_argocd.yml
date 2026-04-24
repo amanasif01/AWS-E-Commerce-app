@@ -1,0 +1,36 @@
+---
+- name: Install ArgoCD on Kubernetes
+  hosts: boutique_servers
+  become: yes
+  tasks:
+    - name: Create ArgoCD namespace
+      command: microk8s kubectl create namespace argocd
+      ignore_errors: yes
+
+    - name: Download ArgoCD manifest
+      get_url:
+        url: https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        dest: /tmp/argocd-install.yaml
+
+    - name: Install ArgoCD
+      command: microk8s kubectl apply -n argocd -f /tmp/argocd-install.yaml
+
+    - name: Wait for ArgoCD server to be ready
+      command: microk8s kubectl wait --for=condition=available --timeout=600s deployment/argocd-server -n argocd
+
+    - name: Patch ArgoCD server to use NodePort (for web access)
+      command: |
+        microk8s kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "NodePort", "ports": [{"name": "http", "nodePort": 30081, "port": 80, "targetPort": 8080}]}}'
+
+    - name: Get ArgoCD initial admin password
+      command: microk8s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"
+      register: argocd_password_encoded
+
+    - name: Decode ArgoCD password
+      set_fact:
+        argocd_password: "{{ argocd_password_encoded | b64decode }}"
+
+    - name: Apply the Online Boutique Application manifest
+      command: microk8s kubectl apply -f /work/online-boutique-fresh.yaml
+      args:
+        chdir: /work
