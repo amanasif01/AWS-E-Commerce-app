@@ -29,6 +29,13 @@ resource "aws_security_group" "boutique_sg" {
     cidr_blocks = ["0.0.0.0/0"] 
   }
 
+  ingress {
+    from_port   = 30080
+    to_port     = 30080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] 
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -40,7 +47,7 @@ resource "aws_security_group" "boutique_sg" {
 # 3. Create the actual Server (EC2)
 resource "aws_instance" "boutique_server" {
   ami           = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
-  instance_type = "t3.small"              # Trying a smaller instance to bypass restrictions
+  instance_type = "t3.small"
   key_name      = "my-project-key"        # The key pair you just created
   
   vpc_security_group_ids = [aws_security_group.boutique_sg.id]
